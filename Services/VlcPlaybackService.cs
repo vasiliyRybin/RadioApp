@@ -3,6 +3,7 @@ using Serilog;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -382,6 +383,8 @@ namespace RadioApp.Services
                 return;
             }
 
+            trackTitle = FixIcyMetadataEncoding(trackTitle);
+
             if (string.IsNullOrWhiteSpace(trackTitle))
             {
                 return;
@@ -401,6 +404,135 @@ namespace RadioApp.Services
             );
 
             NowPlayingTrackChanged?.Invoke(this, trackTitle);
+        }
+
+        /// <summary>
+        /// Repairs "now playing" titles that arrive mis-decoded from ICY metadata.
+        ///
+        /// ICY / Shoutcast metadata carries no encoding declaration — the station just
+        /// sends raw bytes — so LibVLC has to guess, and gets it wrong in two common ways:
+        ///
+        ///   A) The station sent UTF-8, but VLC decoded it as Windows-1252/Latin-1.
+        ///      Example: the apostrophe "’" (UTF-8 bytes E2 80 99) shows up as "â€™",
+        ///      "é" as "Ã©", "°" as "Â°".
+        ///   B) A Central European (e.g. Polish) station sent Windows-1250, decoded as
+        ///      Latin-1. Example: "ł" (byte 0xB3) shows up as "³".
+        ///
+        /// Strategy:
+        ///   - Pure ASCII → nothing to fix.
+        ///   - Case A: map the string back to bytes via Windows-1252 (then Latin-1); if
+        ///     those bytes form VALID UTF-8 that differs from the input, the station really
+        ///     sent UTF-8 — return the decoded text. Valid multi-byte UTF-8 almost never
+        ///     occurs by accident, so this is a strong, low-false-positive signal.
+        ///   - Case B: if every character is in the Latin-1 range, recover the bytes and
+        ///     decode them as Windows-1250.
+        ///   - Otherwise return the string unchanged.
+        ///
+        /// This is a heuristic (ICY simply doesn't tell us the encoding), but it is biased
+        /// to never corrupt ASCII or already-correct text, and falls back to the original
+        /// string whenever a repair can't be made cleanly.
+        /// </summary>
+        private static string FixIcyMetadataEncoding(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return text;
+            }
+
+            // Pure ASCII — nothing to repair.
+            bool hasNonAscii = false;
+            foreach (char ch in text)
+            {
+                if (ch > 0x007F)
+                {
+                    hasNonAscii = true;
+                    break;
+                }
+            }
+
+            if (!hasNonAscii)
+            {
+                return text;
+            }
+
+            // Case A: UTF-8 that was mis-decoded as a single-byte codepage. Windows-1252
+            // covers the "smart" punctuation (’ “ ” € ™ …); Latin-1 is the fallback for
+            // the few bytes Windows-1252 leaves undefined.
+            string recovered = TryRecoverMisdecodedUtf8(text, 1252)
+                            ?? TryRecoverMisdecodedUtf8(text, 28591);
+
+            if (recovered != null)
+            {
+                return recovered;
+            }
+
+            // Case B: Central European (Windows-1250) read as Latin-1, e.g. Polish "ł".
+            bool allLatin1 = true;
+            foreach (char ch in text)
+            {
+                if (ch > 0x00FF)
+                {
+                    allLatin1 = false;
+                    break;
+                }
+            }
+
+            if (allLatin1)
+            {
+                try
+                {
+                    byte[] raw = Encoding.GetEncoding(28591).GetBytes(text); // byte-preserving
+                    return Encoding.GetEncoding(1250).GetString(raw);
+                }
+                catch
+                {
+                    // fall through to returning the original text
+                }
+            }
+
+            return text;
+        }
+
+        /// <summary>
+        /// Tries to reverse a "UTF-8 decoded as &lt;codePage&gt;" mojibake: re-encode the
+        /// string to bytes via that codepage and, if the bytes are valid UTF-8 and the
+        /// decoded result actually differs, return that decoded text. Returns null when
+        /// this isn't the mojibake in question (so the caller can try something else).
+        /// </summary>
+        private static string TryRecoverMisdecodedUtf8(string text, int codePage)
+        {
+            try
+            {
+                Encoding source = Encoding.GetEncoding(
+                    codePage,
+                    EncoderFallback.ExceptionFallback,   // bail if a char isn't in this codepage
+                    DecoderFallback.ReplacementFallback);
+
+                byte[] bytes;
+                try
+                {
+                    bytes = source.GetBytes(text);
+                }
+                catch (EncoderFallbackException)
+                {
+                    return null; // not a clean reverse for this codepage
+                }
+
+                // Strict UTF-8: throws if the bytes aren't valid UTF-8.
+                string decoded = new UTF8Encoding(false, true).GetString(bytes);
+
+                // Only accept a real change; identical output means this wasn't mojibake.
+                if (string.Equals(decoded, text, StringComparison.Ordinal))
+                {
+                    return null;
+                }
+
+                return decoded;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private void MediaPlayer_Playing(object sender, EventArgs e)
@@ -507,6 +639,8 @@ namespace RadioApp.Services
             {
                 return;
             }
+
+            rawValue = FixIcyMetadataEncoding(rawValue);
 
             if (string.IsNullOrWhiteSpace(rawValue))
             {

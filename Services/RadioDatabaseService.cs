@@ -26,30 +26,30 @@ namespace RadioApp.Services
                 using (var command = connection.CreateCommand())
                 {
                     command.CommandText = @"
-                CREATE TABLE IF NOT EXISTS MediaItems
-                (
-                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    Title TEXT NOT NULL,
-                    Description TEXT,
-                    SourceType INTEGER NOT NULL,
-                    StreamUrl TEXT NOT NULL,
-                    WebsiteUrl TEXT,
-                    Genre TEXT,
-                    SortOrder INTEGER NOT NULL DEFAULT 0,
-                    PlayCount INTEGER NOT NULL DEFAULT 0,
-                    IsEnabled INTEGER NOT NULL DEFAULT 1
-                );
+                            CREATE TABLE IF NOT EXISTS MediaItems
+                            (
+                                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                Title TEXT NOT NULL,
+                                Description TEXT,
+                                SourceType INTEGER NOT NULL,
+                                StreamUrl TEXT NOT NULL,
+                                WebsiteUrl TEXT,
+                                Genre TEXT,
+                                SortOrder INTEGER NOT NULL DEFAULT 0,
+                                PlayCount INTEGER NOT NULL DEFAULT 0,
+                                IsEnabled INTEGER NOT NULL DEFAULT 1
+                            );
 
-                CREATE TABLE IF NOT EXISTS PlayHistoryItems
-                (
-                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    MediaItemId INTEGER NOT NULL,
-                    EventTime DATETIME NOT NULL,
-                    EventType TEXT NOT NULL DEFAULT 'Started',
-                    Comment TEXT,
-                    FOREIGN KEY (MediaItemId) REFERENCES MediaItems(Id) ON DELETE CASCADE
-                );
-            ";
+                            CREATE TABLE IF NOT EXISTS PlayHistoryItems
+                            (
+                                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                MediaItemId INTEGER NOT NULL,
+                                EventTime DATETIME NOT NULL,
+                                EventType TEXT NOT NULL DEFAULT 'Started',
+                                Comment TEXT,
+                                FOREIGN KEY (MediaItemId) REFERENCES MediaItems(Id) ON DELETE CASCADE
+                            );
+                        ";
 
                     command.ExecuteNonQuery();
                 }
@@ -63,6 +63,10 @@ namespace RadioApp.Services
                 EnsurePlayHistoryItemsMigrated(connection);
 
                 DropObsoletePlaybackEventTypesTableIfExists(connection);
+
+                EnsurePlaySessionViewExists(connection);
+
+                EnsureStationTotalPlayTimeViewExists(connection);
             }
         }
 
@@ -95,6 +99,107 @@ namespace RadioApp.Services
                     "ALTER TABLE MediaItems ADD COLUMN " + columnName + " " + columnDefinition + ";";
 
                 alterCommand.ExecuteNonQuery();
+            }
+        }
+
+        private void EnsurePlaySessionViewExists(SQLiteConnection connection)
+        {
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = @"
+                        DROP VIEW IF EXISTS StationPlaySessions;
+
+                        CREATE VIEW StationPlaySessions AS
+                        WITH OrderedEvents AS
+                        (
+                            SELECT
+                                Id,
+                                MediaItemId,
+                                EventTime,
+                                EventType,
+
+                                LEAD(EventTime) OVER
+                                (
+                                    PARTITION BY MediaItemId
+                                    ORDER BY EventTime, Id
+                                ) AS StopTime,
+
+                                LEAD(EventType) OVER
+                                (
+                                    PARTITION BY MediaItemId
+                                    ORDER BY EventTime, Id
+                                ) AS NextEventType
+
+                            FROM PlayHistoryItems
+                            WHERE EventType IN ('Started', 'Stopped')
+                        ),
+
+                        Sessions AS
+                        (
+                            SELECT
+                                MediaItemId,
+                                EventTime AS StartTime,
+                                StopTime,
+
+                                CAST
+                                (
+                                    ROUND((julianday(StopTime) - julianday(EventTime)) * 86400)
+                                    AS INTEGER
+                                ) AS DurationSeconds
+
+                            FROM OrderedEvents
+                            WHERE EventType = 'Started'
+                              AND NextEventType = 'Stopped'
+                              AND StopTime IS NOT NULL
+                        )
+
+                        SELECT
+                            s.MediaItemId,
+                            m.Title AS StationTitle,
+                            s.StartTime,
+                            s.StopTime,
+                            s.DurationSeconds,
+
+                            printf
+                            (
+                                '%02d:%02d:%02d',
+                                s.DurationSeconds / 3600,
+                                (s.DurationSeconds % 3600) / 60,
+                                s.DurationSeconds % 60
+                            ) AS DurationFormatted
+
+                        FROM Sessions s
+                        LEFT JOIN MediaItems m ON m.Id = s.MediaItemId;
+                    ";
+
+                command.ExecuteNonQuery();
+            }
+        }
+
+        /// <summary>
+        /// Creates (or refreshes) the StationTotalPlayTime view, which aggregates the
+        /// per-session StationPlaySessions view into one row per station with the grand
+        /// total of played seconds. Recreated on every startup so it always matches the
+        /// current definition. Depends on StationPlaySessions, so it must run after
+        /// EnsurePlaySessionViewExists.
+        /// </summary>
+        private void EnsureStationTotalPlayTimeViewExists(SQLiteConnection connection)
+        {
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = @"
+                        DROP VIEW IF EXISTS StationTotalPlayTime;
+
+                        CREATE VIEW StationTotalPlayTime AS
+                        SELECT
+                            MediaItemId,
+                            StationTitle,
+                            SUM(DurationSeconds) AS TotalSeconds
+                        FROM StationPlaySessions
+                        GROUP BY MediaItemId;
+                    ";
+
+                command.ExecuteNonQuery();
             }
         }
 
@@ -226,6 +331,35 @@ namespace RadioApp.Services
                                 .ThenBy(x => x.Title)
                                 .ToListAsync();
             }
+        }
+
+        /// <summary>
+        /// Returns total played seconds per station, read from the StationTotalPlayTime
+        /// view (which only counts finished Started->Stopped sessions). Stations with no
+        /// finished sessions are simply absent from the dictionary; callers treat a
+        /// missing id as 0.
+        /// </summary>
+        public async Task<Dictionary<int, long>> GetStationTotalPlaySecondsAsync()
+        {
+            using (var db = new RadioDbContext())
+            {
+                var rows = await db.Database
+                    .SqlQuery<StationPlayTimeRow>(
+                        "SELECT MediaItemId, TotalSeconds FROM StationTotalPlayTime")
+                    .ToListAsync();
+
+                return rows.ToDictionary(r => r.MediaItemId, r => r.TotalSeconds);
+            }
+        }
+
+        /// <summary>
+        /// Row shape for the raw StationTotalPlayTime read. Not an EF entity — only used
+        /// to materialize the SqlQuery result.
+        /// </summary>
+        private class StationPlayTimeRow
+        {
+            public int MediaItemId { get; set; }
+            public long TotalSeconds { get; set; }
         }
 
         /// <summary>

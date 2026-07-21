@@ -155,6 +155,7 @@
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="30"/>
             </Grid.RowDefinitions>
             <ListBox x:Name="StationsListBox"
@@ -194,6 +195,14 @@
                               Click="SortStationsByPlayCountDescendingMenuItem_Click"/>
                             </MenuItem>
 
+                            <MenuItem Header="Played time">
+                                <MenuItem Header="Ascending"
+                              Click="SortStationsByPlayedTimeAscendingMenuItem_Click"/>
+
+                                <MenuItem Header="Descending"
+                              Click="SortStationsByPlayedTimeDescendingMenuItem_Click"/>
+                            </MenuItem>
+
                         </MenuItem>
                     </ContextMenu>
                 </ListBox.ContextMenu>
@@ -215,8 +224,19 @@
 
             </ListBox>
 
-            <Grid Grid.Row="1" x:Name="PlaylistButtonGrid">
+            <!-- Live search box. Hidden until the magnifier button is toggled; sits above
+                 the +/-/edit/search buttons and filters the list by station name. -->
+            <TextBox x:Name="SearchTextBox"
+                     Grid.Row="1"
+                     Margin="0,2,0,2"
+                     Padding="4,2"
+                     VerticalContentAlignment="Center"
+                     Visibility="Collapsed"
+                     TextChanged="SearchTextBox_TextChanged"/>
+
+            <Grid Grid.Row="2" x:Name="PlaylistButtonGrid">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
@@ -235,7 +255,8 @@
                         FontSize="22"
                         HorizontalContentAlignment="Center"
                         VerticalContentAlignment="Center"
-                        ToolTip="Delete station" Click="DeleteButton_ClickAsync"/>
+                        ToolTip="Delete station" 
+                        Click="DeleteButton_ClickAsync"/>
 
                 <Button x:Name="EditButton"
                         Grid.Column="2" 
@@ -244,7 +265,18 @@
                         FontSize="20"
                         HorizontalContentAlignment="Center"
                         VerticalContentAlignment="Center"
-                        ToolTip="Edit station" Click="EditButton_Click"/>
+                        ToolTip="Edit station" 
+                        Click="EditButton_Click"/>
+
+                <Button x:Name="SearchToggleButton"
+                        Grid.Column="3"
+                        FontFamily="Segoe MDL2 Assets"
+                        Content="&#xE721;"
+                        FontSize="20"
+                        HorizontalContentAlignment="Center"
+                        VerticalContentAlignment="Center"
+                        ToolTip="Search stations" 
+                        Click="SearchToggleButton_Click"/>
             </Grid>
 
         </Grid>

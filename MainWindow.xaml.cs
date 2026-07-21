@@ -72,7 +72,8 @@ namespace RadioApp
         private enum StationSortField
         {
             Name,
-            PlayCount
+            PlayCount,
+            PlayedTime
         }
 
         private enum SortDirection
@@ -353,6 +354,14 @@ namespace RadioApp
                 return;
             }
 
+            // Reordering is disabled while a search filter is active: the filtered view's
+            // indices don't line up with the underlying playlist, so a drop could scramble
+            // the real order.
+            if (IsStationFilterActive())
+            {
+                return;
+            }
+
             Point currentPosition = e.GetPosition(null);
 
             if (Math.Abs(currentPosition.X - _dragStartPoint.X) < SystemParameters.MinimumHorizontalDragDistance &&
@@ -377,14 +386,19 @@ namespace RadioApp
 
         private async void StationsListBox_Drop(object sender, DragEventArgs e)
         {
+            // Safety net: dragging shouldn't even start while filtered, but never reorder
+            // the playlist from a filtered view just in case a drop still arrives.
+            if (IsStationFilterActive())
+            {
+                return;
+            }
+
             if (!e.Data.GetDataPresent(typeof(MediaItem)))
             {
                 return;
             }
 
-            MediaItem droppedItem = e.Data.GetData(typeof(MediaItem)) as MediaItem;
-
-            if (droppedItem == null)
+            if (!(e.Data.GetData(typeof(MediaItem)) is MediaItem droppedItem))
             {
                 return;
             }
@@ -881,7 +895,8 @@ namespace RadioApp
                 );
 
                 _playlist = await _databaseService.GetEnabledMediaItems();
-                StationsListBox.ItemsSource = _playlist;
+                //StationsListBox.ItemsSource = _playlist;
+                RefreshStationsView();
             }
             catch (Exception ex)
             {
@@ -1029,6 +1044,14 @@ namespace RadioApp
 
             MediaItem selectedItem = StationsListBox.SelectedItem as MediaItem;
 
+            // Played-time sorting needs aggregated totals from the StationTotalPlayTime
+            // view. Fetch them once up front (stations with no sessions default to 0).
+            Dictionary<int, long> playedSeconds = null;
+            if (field == StationSortField.PlayedTime)
+            {
+                playedSeconds = await _databaseService.GetStationTotalPlaySecondsAsync();
+            }
+
             switch (field)
             {
                 case StationSortField.Name:
@@ -1049,6 +1072,26 @@ namespace RadioApp
                             .ToList()
                         : _playlist
                             .OrderByDescending(x => x.PlayCount)
+                            .ThenBy(x => x.Title ?? string.Empty, StringComparer.CurrentCultureIgnoreCase)
+                            .ToList();
+                    break;
+
+                case StationSortField.PlayedTime:
+                    var totals = playedSeconds ?? new Dictionary<int, long>();
+
+                    Func<MediaItem, long> getSeconds = m =>
+                    {
+                        long s;
+                        return totals.TryGetValue(m.Id, out s) ? s : 0L;
+                    };
+
+                    _playlist = direction == SortDirection.Ascending
+                        ? _playlist
+                            .OrderBy(getSeconds)
+                            .ThenBy(x => x.Title ?? string.Empty, StringComparer.CurrentCultureIgnoreCase)
+                            .ToList()
+                        : _playlist
+                            .OrderByDescending(getSeconds)
                             .ThenBy(x => x.Title ?? string.Empty, StringComparer.CurrentCultureIgnoreCase)
                             .ToList();
                     break;
@@ -1650,6 +1693,94 @@ namespace RadioApp
 
             ConnectivityStatusPanel.Visibility = Visibility.Collapsed;
             ConnectNowButton.Visibility = Visibility.Collapsed;
+        }
+
+        private void SearchToggleButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (SearchTextBox.Visibility == Visibility.Visible)
+            {
+                // Toggle off: hide the box and restore the full list.
+                SearchTextBox.Visibility = Visibility.Collapsed;
+                SearchTextBox.Text = string.Empty;
+                StationsListBox.ItemsSource = _playlist;
+            }
+            else
+            {
+                // Toggle on: show and focus so the user can start typing right away.
+                SearchTextBox.Visibility = Visibility.Visible;
+                SearchTextBox.Focus();
+            }
+        }
+
+        private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            ApplyStationFilter(SearchTextBox.Text);
+        }
+
+        /// <summary>
+        /// Filters the stations list by title as the user types. An empty query restores
+        /// the full list. The filtered entries are the same MediaItem instances, so
+        /// selection and playback keep working normally.
+        /// </summary>
+        private void ApplyStationFilter(string query)
+        {
+            if (_playlist == null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                StationsListBox.ItemsSource = _playlist;
+                return;
+            }
+
+            string trimmed = query.Trim();
+
+            var filtered = _playlist
+                .Where(x => !string.IsNullOrEmpty(x.Title) &&
+                            x.Title.IndexOf(trimmed, StringComparison.CurrentCultureIgnoreCase) >= 0)
+                .ToList();
+
+            StationsListBox.ItemsSource = filtered;
+        }
+
+        /// <summary>
+        /// True when the search box is open and contains a non-empty query, i.e. the list
+        /// is currently showing filtered results rather than the full playlist.
+        /// </summary>
+        private bool IsStationFilterActive()
+        {
+            return SearchTextBox != null
+                && SearchTextBox.Visibility == Visibility.Visible
+                && !string.IsNullOrWhiteSpace(SearchTextBox.Text);
+        }
+
+        /// <summary>
+        /// Rebinds the stations list, keeping the active search filter applied if there is
+        /// one — so operations like deleting a station don't clear the current results.
+        /// </summary>
+        private void RefreshStationsView()
+        {
+            if (IsStationFilterActive())
+            {
+                ApplyStationFilter(SearchTextBox.Text);
+            }
+            else
+            {
+                StationsListBox.ItemsSource = null;
+                StationsListBox.ItemsSource = _playlist;
+            }
+        }
+
+        private async void SortStationsByPlayedTimeAscendingMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            await SortStationsAsync(StationSortField.PlayedTime, SortDirection.Ascending);
+        }
+
+        private async void SortStationsByPlayedTimeDescendingMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            await SortStationsAsync(StationSortField.PlayedTime, SortDirection.Descending);
         }
     }
 }
