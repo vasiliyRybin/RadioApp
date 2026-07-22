@@ -353,6 +353,25 @@ namespace RadioApp.Services
         }
 
         /// <summary>
+        /// Reads the total played seconds for a single station on demand. Used by the
+        /// station tooltip so the figure is always current at hover time. Returns 0 when
+        /// the station has no finished sessions yet.
+        /// </summary>
+        public long GetStationTotalPlaySeconds(int mediaItemId)
+        {
+            using (var db = new RadioDbContext())
+            {
+                long? total = db.Database
+                    .SqlQuery<long?>(
+                        "SELECT SUM(DurationSeconds) FROM StationPlaySessions WHERE MediaItemId = @p0",
+                        mediaItemId)
+                    .FirstOrDefault();
+
+                return total ?? 0L;
+            }
+        }
+
+        /// <summary>
         /// Row shape for the raw StationTotalPlayTime read. Not an EF entity — only used
         /// to materialize the SqlQuery result.
         /// </summary>

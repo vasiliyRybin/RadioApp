@@ -166,6 +166,16 @@ namespace RadioApp
             await SortStationsAsync(StationSortField.PlayCount, SortDirection.Descending);
         }
 
+        private async void SortStationsByPlayedTimeAscendingMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            await SortStationsAsync(StationSortField.PlayedTime, SortDirection.Ascending);
+        }
+
+        private async void SortStationsByPlayedTimeDescendingMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            await SortStationsAsync(StationSortField.PlayedTime, SortDirection.Descending);
+        }
+
         private async void AddButton_Click(object sender, RoutedEventArgs e)
         {
             var window = new AddStationWindow
@@ -1265,6 +1275,158 @@ namespace RadioApp
             // VolumeSlider_ValueChanged already updates the label and calls SetVolume
         }
 
+        // ---- Station search / live filter ----
+
+        private void SearchToggleButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (SearchTextBox.Visibility == Visibility.Visible)
+            {
+                // Toggle off: hide the box and restore the full list.
+                SearchTextBox.Visibility = Visibility.Collapsed;
+                SearchTextBox.Text = string.Empty;
+                StationsListBox.ItemsSource = _playlist;
+            }
+            else
+            {
+                // Toggle on: show and focus so the user can start typing right away.
+                SearchTextBox.Visibility = Visibility.Visible;
+                SearchTextBox.Focus();
+            }
+        }
+
+        private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            ApplyStationFilter(SearchTextBox.Text);
+        }
+
+        /// <summary>
+        /// Filters the stations list by title as the user types. An empty query restores
+        /// the full list. The filtered entries are the same MediaItem instances, so
+        /// selection and playback keep working normally.
+        /// </summary>
+        private void ApplyStationFilter(string query)
+        {
+            if (_playlist == null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                StationsListBox.ItemsSource = _playlist;
+                return;
+            }
+
+            string trimmed = query.Trim();
+
+            var filtered = _playlist
+                .Where(x => !string.IsNullOrEmpty(x.Title) &&
+                            x.Title.IndexOf(trimmed, StringComparison.CurrentCultureIgnoreCase) >= 0)
+                .ToList();
+
+            StationsListBox.ItemsSource = filtered;
+        }
+
+        /// <summary>
+        /// True when the search box is open and contains a non-empty query, i.e. the list
+        /// is currently showing filtered results rather than the full playlist.
+        /// </summary>
+        private bool IsStationFilterActive()
+        {
+            return SearchTextBox != null
+                && SearchTextBox.Visibility == Visibility.Visible
+                && !string.IsNullOrWhiteSpace(SearchTextBox.Text);
+        }
+
+        /// <summary>
+        /// Rebinds the stations list, keeping the active search filter applied if there is
+        /// one — so operations like deleting a station don't clear the current results.
+        /// </summary>
+        private void RefreshStationsView()
+        {
+            if (IsStationFilterActive())
+            {
+                ApplyStationFilter(SearchTextBox.Text);
+            }
+            else
+            {
+                StationsListBox.ItemsSource = null;
+                StationsListBox.ItemsSource = _playlist;
+            }
+        }
+
+        // ---- Station tooltip: play count + total listening time, read live on hover ----
+
+        private void StationTooltip_Opening(object sender, ToolTipEventArgs e)
+        {
+            var element = sender as FrameworkElement;
+            var station = element?.DataContext as MediaItem;
+            var toolTip = element?.ToolTip as ToolTip;
+
+            if (station == null || toolTip == null)
+            {
+                return;
+            }
+
+            long totalSeconds = 0;
+
+            try
+            {
+                // Read on demand so the number reflects the current database state each
+                // time the tooltip is shown, for just this one station.
+                totalSeconds = _databaseService.GetStationTotalPlaySeconds(station.Id);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Failed to read total play time for station {Id}.", station.Id);
+            }
+
+            toolTip.Content = BuildStationTooltipContent(station, totalSeconds);
+        }
+
+        private static object BuildStationTooltipContent(MediaItem station, long totalSeconds)
+        {
+            string timesWord = station.PlayCount == 1 ? "time" : "times";
+            string stats = "Played " + station.PlayCount + " " + timesWord
+                         + " · total " + FormatDuration(totalSeconds);
+
+            var panel = new StackPanel { MaxWidth = 300 };
+
+            panel.Children.Add(new TextBlock
+            {
+                Text = stats,
+                FontWeight = FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            if (!string.IsNullOrWhiteSpace(station.Description))
+            {
+                panel.Children.Add(new Separator { Margin = new Thickness(0, 4, 0, 4) });
+
+                panel.Children.Add(new TextBlock
+                {
+                    Text = station.Description,
+                    TextWrapping = TextWrapping.Wrap
+                });
+            }
+
+            return panel;
+        }
+
+        private static string FormatDuration(long totalSeconds)
+        {
+            if (totalSeconds < 0)
+            {
+                totalSeconds = 0;
+            }
+
+            long hours = totalSeconds / 3600;
+            long minutes = (totalSeconds % 3600) / 60;
+            long seconds = totalSeconds % 60;
+
+            return string.Format("{0:00}:{1:00}:{2:00}", hours, minutes, seconds);
+        }
+
         // ============================================================
         //  Connectivity status + automatic reconnect
         // ============================================================
@@ -1693,94 +1855,6 @@ namespace RadioApp
 
             ConnectivityStatusPanel.Visibility = Visibility.Collapsed;
             ConnectNowButton.Visibility = Visibility.Collapsed;
-        }
-
-        private void SearchToggleButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (SearchTextBox.Visibility == Visibility.Visible)
-            {
-                // Toggle off: hide the box and restore the full list.
-                SearchTextBox.Visibility = Visibility.Collapsed;
-                SearchTextBox.Text = string.Empty;
-                StationsListBox.ItemsSource = _playlist;
-            }
-            else
-            {
-                // Toggle on: show and focus so the user can start typing right away.
-                SearchTextBox.Visibility = Visibility.Visible;
-                SearchTextBox.Focus();
-            }
-        }
-
-        private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            ApplyStationFilter(SearchTextBox.Text);
-        }
-
-        /// <summary>
-        /// Filters the stations list by title as the user types. An empty query restores
-        /// the full list. The filtered entries are the same MediaItem instances, so
-        /// selection and playback keep working normally.
-        /// </summary>
-        private void ApplyStationFilter(string query)
-        {
-            if (_playlist == null)
-            {
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(query))
-            {
-                StationsListBox.ItemsSource = _playlist;
-                return;
-            }
-
-            string trimmed = query.Trim();
-
-            var filtered = _playlist
-                .Where(x => !string.IsNullOrEmpty(x.Title) &&
-                            x.Title.IndexOf(trimmed, StringComparison.CurrentCultureIgnoreCase) >= 0)
-                .ToList();
-
-            StationsListBox.ItemsSource = filtered;
-        }
-
-        /// <summary>
-        /// True when the search box is open and contains a non-empty query, i.e. the list
-        /// is currently showing filtered results rather than the full playlist.
-        /// </summary>
-        private bool IsStationFilterActive()
-        {
-            return SearchTextBox != null
-                && SearchTextBox.Visibility == Visibility.Visible
-                && !string.IsNullOrWhiteSpace(SearchTextBox.Text);
-        }
-
-        /// <summary>
-        /// Rebinds the stations list, keeping the active search filter applied if there is
-        /// one — so operations like deleting a station don't clear the current results.
-        /// </summary>
-        private void RefreshStationsView()
-        {
-            if (IsStationFilterActive())
-            {
-                ApplyStationFilter(SearchTextBox.Text);
-            }
-            else
-            {
-                StationsListBox.ItemsSource = null;
-                StationsListBox.ItemsSource = _playlist;
-            }
-        }
-
-        private async void SortStationsByPlayedTimeAscendingMenuItem_Click(object sender, RoutedEventArgs e)
-        {
-            await SortStationsAsync(StationSortField.PlayedTime, SortDirection.Ascending);
-        }
-
-        private async void SortStationsByPlayedTimeDescendingMenuItem_Click(object sender, RoutedEventArgs e)
-        {
-            await SortStationsAsync(StationSortField.PlayedTime, SortDirection.Descending);
         }
     }
 }

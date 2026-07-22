@@ -210,15 +210,13 @@
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <TextBlock Text="{Binding Title}"
-                                   TextTrimming="CharacterEllipsis">
+                                   TextTrimming="CharacterEllipsis"
+                                   ToolTipService.ShowDuration="20000"
+                                   ToolTipOpening="StationTooltip_Opening">
                             <TextBlock.ToolTip>
-                                <ToolTip>
-                                    <TextBlock Text="{Binding Description}"
-                                       TextWrapping="Wrap"
-                                       MaxWidth="300"/>
-                                </ToolTip>
+                                <ToolTip/>
                             </TextBlock.ToolTip>
-                            </TextBlock>
+                        </TextBlock>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
 
