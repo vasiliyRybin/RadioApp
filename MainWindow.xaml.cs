@@ -647,6 +647,7 @@ namespace RadioApp
             EditButton.IsEnabled = !isBusy;
             DeleteButton.IsEnabled = !isBusy;
             StationsListBox.IsEnabled = !isBusy;
+            SearchToggleButton.IsEnabled = !isBusy;
 
             Mouse.OverrideCursor = isBusy ? Cursors.Wait : null;
         }

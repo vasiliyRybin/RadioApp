@@ -11,6 +11,15 @@ namespace RadioApp.Services
 {
     public class RadioDatabaseService
     {
+        /// <summary>
+        /// Row shape for the raw StationTotalPlayTime read. Not an EF entity — only used
+        /// to materialize the SqlQuery result.
+        /// </summary>
+        private class StationPlayTimeRow
+        {
+            public int MediaItemId { get; set; }
+            public long TotalSeconds { get; set; }
+        }
         private void EnsureDatabaseAndTables()
         {
             string connectionString = new SQLiteConnectionStringBuilder
@@ -369,16 +378,6 @@ namespace RadioApp.Services
 
                 return total ?? 0L;
             }
-        }
-
-        /// <summary>
-        /// Row shape for the raw StationTotalPlayTime read. Not an EF entity — only used
-        /// to materialize the SqlQuery result.
-        /// </summary>
-        private class StationPlayTimeRow
-        {
-            public int MediaItemId { get; set; }
-            public long TotalSeconds { get; set; }
         }
 
         /// <summary>
