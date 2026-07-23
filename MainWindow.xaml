@@ -21,45 +21,71 @@
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>
-                <RowDefinition Height="*"/>
+                <!-- Fixed height, not Auto: the connectivity/buffering line appears and
+                     disappears constantly, and an Auto row would grow and shrink with it,
+                     nudging the centred transport buttons up and down every time. The
+                     space is reserved whether or not the status line is visible. -->
+                <RowDefinition Height="30"/>
             </Grid.RowDefinitions>
             <Grid >
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="*"/>
+                    <!-- Both rows are fixed on purpose. The title row reserves room for
+                         three lines plus its top margin, and the status row below reserves
+                         its own line, so the controls in the middle row always get exactly
+                         the same height. Any Auto row here would resize with the station
+                         name or the status text and shift the transport buttons. -->
+                    <RowDefinition Height="62"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <StackPanel Grid.RowSpan="2"
-                            VerticalAlignment="Center"
-                            HorizontalAlignment="Center">
 
-                    <TextBlock x:Name="NowPlayingTextBlock"
-                               TextWrapping="Wrap"
-                               TextAlignment="Center"
-                               HorizontalAlignment="Center"
-                               MaxWidth="200"
-                               Margin="0,0,0,14"
-                               Text="Now playing: "/>
+                <TextBlock x:Name="NowPlayingTextBlock"
+                           Grid.Row="0"
+                           TextWrapping="Wrap"
+                           TextTrimming="CharacterEllipsis"
+                           MaxHeight="50"
+                           VerticalAlignment="Top"
+                           TextAlignment="Center"
+                           HorizontalAlignment="Center"
+                           MaxWidth="200"
+                           Margin="0,12,0,0"
+                           ToolTip="{Binding RelativeSource={RelativeSource Self}, Path=Text}"
+                           Text="Now playing: "/>
 
-                    <Grid Margin="0,0,0,14"
+                <Grid Grid.Row="1">
+                    <Grid.RowDefinitions>
+                        <!-- Controls get all the space that is left over, and the track /
+                             genre lines get a reserved block of their own. Because that
+                             block is a fixed height, the controls area never changes size,
+                             so the transport buttons stay put no matter how long the
+                             current track title is. -->
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="72"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0"
+                                VerticalAlignment="Center"
+                                HorizontalAlignment="Center">
+
+                        <Grid Margin="0,0,0,14"
                           Width="150"
                           HorizontalAlignment="Center">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
 
-                        <Button Content="⏮"
+                            <Button Content="⏮"
                                 x:Name="PreviousItemButton"
                                 Grid.Column="0"
                                 HorizontalContentAlignment="Center"
                                 VerticalContentAlignment="Center"
                                 Click="PreviousItemButton_Click"/>
 
-                        <Button Content="▶"
+                            <Button Content="▶"
                                 x:Name="PlayPauseButton"
                                 Grid.Column="1"
                                 Click="PlayPauseButton_Click"
@@ -67,25 +93,25 @@
                                 HorizontalContentAlignment="Center"
                                 VerticalContentAlignment="Center"/>
 
-                        <Button Content="⏭"
+                            <Button Content="⏭"
                                 x:Name="NextItemButton"
                                 Grid.Column="2"
                                 HorizontalContentAlignment="Center"
                                 VerticalContentAlignment="Center"
                                 Click="NextItemButton_Click"/>
-                    </Grid>
+                        </Grid>
 
-                    <StackPanel Orientation="Horizontal"
+                        <StackPanel Orientation="Horizontal"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center">
 
-                        <TextBlock Text="&#xE995;"
+                            <TextBlock Text="&#xE995;"
                                        FontFamily="Segoe MDL2 Assets"
                                        FontSize="16"
                                        VerticalAlignment="Center"
                                        Margin="0,0,8,0"/>
 
-                        <Slider x:Name="VolumeSlider"
+                            <Slider x:Name="VolumeSlider"
                                     Width="105"
                                     Minimum="0"
                                     Maximum="100"
@@ -93,31 +119,53 @@
                                     VerticalAlignment="Center"
                                     ValueChanged="VolumeSlider_ValueChanged"/>
 
-                        <TextBlock x:Name="VolumeValueTextBlock"
+                            <TextBlock x:Name="VolumeValueTextBlock"
                                    Text="80%"
                                    Width="34"
                                    Margin="8,0,0,0"
                                    VerticalAlignment="Center"/>
+                        </StackPanel>
                     </StackPanel>
 
-                    <TextBlock x:Name="NowPlayingTrackTextBlock"
+                    <StackPanel Grid.Row="1"
+                                VerticalAlignment="Top"
+                                HorizontalAlignment="Center">
+
+                        <TextBlock x:Name="NowPlayingTrackTextBlock"
                                Text=""
                                FontSize="12"
                                Foreground="Gray"
                                TextWrapping="Wrap"
+                               TextTrimming="CharacterEllipsis"
+                               MaxHeight="48"
                                TextAlignment="Center"
                                HorizontalAlignment="Center"
                                MaxWidth="190"
-                               Margin="0,10,0,0"/>
+                               Margin="0,10,0,0">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <!-- Show the untruncated track title on hover, but never
+                                     pop an empty tooltip when nothing is playing. -->
+                                    <Setter Property="ToolTip"
+                                        Value="{Binding RelativeSource={RelativeSource Self}, Path=Text}"/>
+                                    <Style.Triggers>
+                                        <Trigger Property="Text" Value="">
+                                            <Setter Property="ToolTip" Value="{x:Null}"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
 
-                    <TextBlock x:Name="NowPlayingGenreTextBlock"
+                        <TextBlock x:Name="NowPlayingGenreTextBlock"
                                Text=""
                                FontSize="11"
                                Foreground="Gray"
                                TextAlignment="Center"
                                HorizontalAlignment="Center"
                                Margin="0,2,0,0"/>
-                </StackPanel>
+                    </StackPanel>
+                </Grid>
             </Grid>
 
             <!-- Internet connectivity status. Lives in the (previously empty)
