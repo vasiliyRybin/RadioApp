@@ -3,6 +3,7 @@ using Serilog;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -262,14 +263,16 @@ namespace RadioApp.Services
                 watch.ElapsedMilliseconds
             );
 
-            // For debugging VLC issues, you can enable verbose logging by using the following options:
-            //_libVlc = new LibVLC("--no-video", "--verbose=2");
-            //_libVlc.Log += LibVlc_Log;
 
             _libVlc = new LibVLC(
                         "--no-video",
-                        "--quiet"
+                        "--quiet",
+                        //"--verbose=2",
+                        "--ipv4"      // force IPv4: dead AAAA records stall connections
                     );
+
+            // For debugging VLC issues, you can enable verbose logging by using the following options:
+            _libVlc.Log += LibVlc_Log;
 
             Log.Information(
                 "LibVLC instance created in {ElapsedMilliseconds} ms.",
@@ -432,7 +435,39 @@ namespace RadioApp.Services
         /// to never corrupt ASCII or already-correct text, and falls back to the original
         /// string whenever a repair can't be made cleanly.
         /// </summary>
+        /// <summary>
+        /// Cleans up a "now playing" title coming from ICY metadata: repairs the byte
+        /// encoding, then decodes any HTML entities the station embedded in the text.
+        ///
+        /// The two problems are independent and need handling in this order. Some
+        /// stations send text whose bytes were decoded with the wrong charset ("ł"
+        /// arriving as "³"); others send perfectly valid ASCII that happens to contain
+        /// HTML escapes, e.g. "Dymna Lotva - &amp;#1055;&amp;#1072;..." for a Belarusian
+        /// title. The second case is pure ASCII, so the encoding repair below returns it
+        /// untouched — the decode has to happen out here, after it.
+        /// </summary>
         private static string FixIcyMetadataEncoding(string text)
+        {
+            string repaired = FixIcyMetadataEncodingCore(text);
+
+            if (string.IsNullOrEmpty(repaired))
+            {
+                return repaired;
+            }
+
+            try
+            {
+                // Safe for ordinary titles: text without entities comes back unchanged,
+                // and "AT&T" stays "AT&T".
+                return WebUtility.HtmlDecode(repaired);
+            }
+            catch
+            {
+                return repaired;
+            }
+        }
+
+        private static string FixIcyMetadataEncodingCore(string text)
         {
             if (string.IsNullOrEmpty(text))
             {
